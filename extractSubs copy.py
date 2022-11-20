@@ -9,7 +9,7 @@ import numpy as np
 import re
 import time
 # from collections import Counter
-
+from PIL import Image, ImageEnhance, ImageFilter
 output = ''
 def extractFrames(path):
     start = time.time()
@@ -32,7 +32,7 @@ def extractFrames(path):
             break
         if count % fps*2 == 0:
             frame +=1
-            if frame >26:
+            if frame >30:
                 print(f'{frame}/{round(totalFrames/(fps*2))}')
                 line =extractTextAcc(img,frame)
                 line = line.replace(" ", "")
@@ -58,18 +58,88 @@ def extractFrames(path):
         
 
 def processMask(img):
-    hsv = cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
-    sensitivity = 5
-    lower_white = np.array([0,0,255-sensitivity])
-    upper_white = np.array([255,sensitivity,255])
-    white = cv2.inRange(hsv,lower_white,upper_white)
-    # black = cv2.inRange(hsv,(0,0,0),(255,255,255))
 
+    # > Increase contrast
+    img = Image.fromarray(img)
+    img = ImageEnhance.Contrast(img)
+    img = img.enhance(1.20)
+    img = np.array(img, dtype= "uint8")
+
+    hsv = cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
+    sensitivity = 0  # or 12  | 20
+    lower_white = np.array([0,0,255-sensitivity])
+    upper_white = np.array([0,sensitivity,255])
+    # lower_black = np.array([0, 0, 0])
+    # upper_black = np.array([350,55,100])
+    white = cv2.inRange(hsv,lower_white,upper_white)
+    # black = cv2.inRange(hsv,lower_black,upper_black)
     mask = white
     target = cv2.bitwise_and(img,img, mask=mask)
     target = cv2.cvtColor(target, cv2.COLOR_BGR2GRAY)
-    target = 255- target
+    # target = 255- target
+
+    # > convert to LAB 1
+    # I_LAB = cv2.cvtColor(np.array(img,dtype="uint8"), cv2.COLOR_RGB2LAB)
+    # L = I_LAB[:, :, 0] / 255.0  # Convert to range [0,1].
+    # intensity = 0.05
+    # dark = cv2.inRange(L,0,0+intensity)
+    # light = cv2.inRange(L,1-intensity,1)
+    # mask = dark | light
+    # target = cv2.bitwise_and(img,img, mask=mask)
+    # target = cv2.cvtColor(target, cv2.COLOR_BGR2GRAY)
+    # temp = 255 - target
+    # cv2.imshow('lab',temp)
+    # cv2.waitKey(0)
+    # new_image = img.filter(ImageFilter.EDGE_ENHANCE_MORE)
+
+    # target.show()
     return target
+
+def Lab_Segmentation(image):
+    lowerRange= np.array([0, 135, 135] , dtype="uint8")
+    upperRange= np.array([255, 160, 195], dtype="uint8")
+    mask = image[:].copy()
+
+    imageLab = cv2.cvtColor(image, cv2.COLOR_BGR2Lab)
+    imageRange = cv2.inRange(imageLab,lowerRange, upperRange)
+    
+    mask[:,:,0] = imageRange
+    mask[:,:,1] = imageRange
+    mask[:,:,2] = imageRange
+    
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    closing = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    faceLab = cv2.bitwise_and(image,mask)
+
+    cv2.imshow('lab',faceLab)
+    cv2.waitKey(0)
+
+    return faceLab
+
+def loopGrey(img):
+    # > Increase contrast
+    img = Image.fromarray(img)
+    img = ImageEnhance.Contrast(img)
+    img = img.enhance(1.20)
+    img = np.array(img, dtype= "uint8")
+    masks = []
+    shades = 80
+    for i in range(0,shades):
+        a = 255 - i
+        min_grey = np.array([a,a,a])
+        mask = cv2.inRange(img,min_grey,min_grey)
+        masks.append(mask)
+    
+    count = 0
+    for mask in masks:
+        count += 1
+        target = cv2.bitwise_and(img,img, mask=mask)
+        target = cv2.cvtColor(target, cv2.COLOR_BGR2GRAY)
+
+        if count == 1:
+            result = target
+        result = cv2.add(result, target)
+    return result        
 
 def remove_noise(img,threshold):
     """
@@ -89,6 +159,7 @@ def preprocess(img):
     """
     # img = cv2.imread(img_path)
     # img = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(img, (3,3), 0)
 
     thresh = cv2.threshold(blur, 150, 255, cv2.THRESH_BINARY_INV)[1]
@@ -102,6 +173,7 @@ def preprocess(img):
 
 def size_threshold(img,minimum, maximum):
     retval, labels, stats, centroids = cv2.connectedComponentsWithStats(img)
+    # print(stats[:, 4])
     for val in np.where((stats[:, 4] < minimum) + (stats[:, 4] > maximum))[0]:
       labels[labels==val] = 0
     return (labels > 0).astype(np.uint8) * 255
@@ -123,11 +195,30 @@ def extractTextAcc(img,frame):
     img = cv2.resize(img, resized_dimensions,
                                 interpolation=cv2.INTER_AREA)
 
-    img = processMask(img)
+    # Increase contrast
+    # # > Increase contrast
+    # img = Image.fromarray(img)
+    # img = ImageEnhance.Contrast(img)
+    # img = img.enhance(1.2)
+    # img = np.array(img, dtype= "uint8")
+    # lab= cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    # l_channel, a, b = cv2.split(lab)
+    # clahe = cv2.createCLAHE(clipLimit=50.0, tileGridSize=(8,8))
+    # cl = clahe.apply(l_channel)
+    # limg = cv2.merge((cl,a,b))
+    # img = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+    # img = np.hstack((img, img))
+
+    # img3 = Lab_Segmentation(img)
+    # img = processMask(img)
+    img = loopGrey(img)
+    
+    img = 255 - img
     img = preprocess(img)
     img = 255 - img
-    img = size_threshold(img, 20, 2000)  # after Mask+kernel
+    img = size_threshold(img, 20, 2500)  # after Mask+kernel 20-2000
     img = 255 - img
+
 
     ## > Checkpoint 1: Test if horizontal line has pixels, to save time
     thickness = 4
